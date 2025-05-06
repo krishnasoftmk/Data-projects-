@@ -2,19 +2,24 @@ from airflow import DAG
 from airflow.utils.dates import days_ago
 from airflow.providers.google.cloud.operators.dataproc import DataprocSubmitJobOperator
 from airflow.providers.google.cloud.operators.bigquery import BigQueryInsertJobOperator
+from airflow.providers.google.cloud.transfers.gcs_to_bigquery import GCSToBigQueryOperator
 from datetime import timedelta
 
-# GCP and resource configuration
+# === GCP Configuration ===
 PROJECT_ID = "sahayaproject"
 REGION = "us-central1"
-CLUSTER_NAME = "your-dataproc-cluster"  # Replace with actual cluster name
+CLUSTER_NAME = "sahaya-dataproc-cluster"  # cluster name
 BUCKET_NAME = "us-central1-nhtsa-composer--9adc8323-bucket"
-BQ_DATASET = "your_dataset"  # Replace with actual BigQuery dataset name
-BQ_TABLE = "processed_nhtsa_data"
+BQ_DATASET = "processed_nhtsa_data"  # BigQuery dataset
 
-# PySpark script location and output path
+# === File Paths ===
 PYSPARK_URI = f"gs://{BUCKET_NAME}/scripts/nhtsa_dataproc_parser.py"
-OUTPUT_JSON_PATH = f"gs://{BUCKET_NAME}/output/parsed_nhtsa_data/*.json"
+PARSED_OUTPUT_JSON = f"gs://{BUCKET_NAME}/output/parsed_nhtsa_data/*.json"
+LOOKUP_CSV_PATH = "data/nhtsa_lookup_file.csv"
+
+# === BigQuery Tables ===
+PARSED_TABLE = "processed_nhtsa_data"
+LOOKUP_TABLE = "nhtsa_lookup_table"
 
 default_args = {
     "owner": "airflow",
@@ -25,18 +30,17 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
-# Define the DAG
 with DAG(
     dag_id="nhtsa_dataproc_pipeline",
+    description="Parse NHTSA JSON, load to BigQuery, load lookup table",
     default_args=default_args,
-    description="Dataproc PySpark job to parse NHTSA data and load into BigQuery",
-    schedule_interval=None,  # Run manually or trigger via API
+    schedule_interval=None,
     start_date=days_ago(1),
     catchup=False,
     tags=["dataproc", "bigquery", "nhtsa"],
 ) as dag:
 
-    # Task 1: Run Dataproc PySpark Job
+    # Task 1: Submit Dataproc PySpark Job
     submit_pyspark_job = DataprocSubmitJobOperator(
         task_id="submit_pyspark_job_to_dataproc",
         project_id=PROJECT_ID,
@@ -49,23 +53,36 @@ with DAG(
         }
     )
 
-    # Task 2: Load JSON result into BigQuery
-    load_to_bigquery = BigQueryInsertJobOperator(
+    # Task 2: Load Parsed Output into BigQuery
+    load_output_to_bigquery = BigQueryInsertJobOperator(
         task_id="load_output_to_bigquery",
         location=REGION,
         configuration={
             "load": {
-                "sourceUris": [OUTPUT_JSON_PATH],
+                "sourceUris": [PARSED_OUTPUT_JSON],
                 "destinationTable": {
                     "projectId": PROJECT_ID,
                     "datasetId": BQ_DATASET,
-                    "tableId": BQ_TABLE,
+                    "tableId": PARSED_TABLE,
                 },
                 "sourceFormat": "NEWLINE_DELIMITED_JSON",
                 "autodetect": True,
-                "writeDisposition": "WRITE_TRUNCATE",
+                "writeDisposition": "WRITE_TRUNCATE"
             }
         }
     )
 
-    submit_pyspark_job >> load_to_bigquery
+    # Task 3: Load Lookup CSV to BigQuery
+    load_lookup_to_bigquery = GCSToBigQueryOperator(
+        task_id="load_lookup_csv_to_bigquery",
+        bucket=BUCKET_NAME,
+        source_objects=[LOOKUP_CSV_PATH],
+        destination_project_dataset_table=f"{PROJECT_ID}.{BQ_DATASET}.{LOOKUP_TABLE}",
+        skip_leading_rows=1,
+        source_format="CSV",
+        autodetect=True,
+        write_disposition="WRITE_TRUNCATE"
+    )
+
+    # DAG Flow
+    submit_pyspark_job >> load_output_to_bigquery >> load_lookup_to_bigquery
