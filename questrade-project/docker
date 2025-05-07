@@ -1,0 +1,14 @@
+FROM gcr.io/dataflow-templates-base/python3-template-launcher-base
+
+WORKDIR /app
+
+COPY dataflow_streaming_pipeline.py .
+COPY requirements.txt .
+
+RUN pip install -r requirements.txt
+
+ENV FLEX_TEMPLATE_PYTHON_PY_FILE=dataflow_streaming_pipeline.py
+ENV FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE=requirements.txt
+
+ENTRYPOINT ["/opt/google/dataflow/python_template_launcher", \
+            "--flex_template_python_launcher_module", "dataflow_streaming_pipeline"]

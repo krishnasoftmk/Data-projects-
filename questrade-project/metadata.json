@@ -1,0 +1,13 @@
+{
+    "name": "questrade-pipeline",
+    "description": "Batch pipeline from Dataproc to BigQuery",
+    "parameters": [
+      {
+        "name": "output_table",
+        "label": "Output BigQuery Table",
+        "helpText": "Table to write transformed data to",
+        "paramType": "TEXT"
+      }
+    ]
+  }
+  
