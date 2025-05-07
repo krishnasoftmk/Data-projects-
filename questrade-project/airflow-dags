@@ -1,0 +1,75 @@
+from airflow import DAG
+from airflow.utils.dates import days_ago
+from airflow.providers.google.cloud.operators.functions import CloudFunctionInvokeFunctionOperator
+from airflow.providers.google.cloud.operators.dataproc import DataprocSubmitJobOperator
+
+# Default arguments for tasks
+default_args = {
+    "owner": "airflow",
+    "retries": 3,
+    "retry_delay": timedelta(minutes=5),
+    "start_date": days_ago(1),
+}
+
+# Define the DAG with default_args
+with DAG(
+    "questrade_pipeline",
+    default_args=default_args,
+    schedule_interval="@daily",
+    catchup=False,
+) as dag:
+
+    # Ingest Data from Cloud Function
+    ingest_data = CloudFunctionInvokeFunctionOperator(
+        task_id="trigger_ingest",
+        function_id="questrade-ingest",
+        location="us-central1",
+        project_id="your-project-id"
+    )
+
+    # Silver Transformation (PySpark)
+    transform_data = DataprocSubmitJobOperator(
+        task_id="silver_transform",
+        project_id="your-project-id",
+        region="us-central1",
+        job={
+            "placement": {"cluster_name": "questrade-dataproc"},
+            "pyspark_job": {
+                "main_python_file_uri": "gs://your-bucket/scripts/silver_transform.py"
+            }
+        }
+    )
+
+    # # Gold Transformation (PySpark) to BigQuery
+    # gold_transform = DataprocSubmitJobOperator(
+    #     task_id="gold_transform",
+    #     project_id="your-project-id",
+    #     region="us-central1",
+    #     job={
+    #         "placement": {"cluster_name": "questrade-dataproc"},
+    #         "pyspark_job": {
+    #             "main_python_file_uri": "gs://your-bucket/scripts/gold_transform.py"
+    #         }
+    #     }
+    # )
+
+        # Gold Transformation (PySpark)
+    gold_transform = DataprocSubmitJobOperator(
+        task_id="gold_transform",
+        project_id="your-project-id",
+        region="us-central1",
+        job={
+            "placement": {"cluster_name": "questrade-dataproc"},
+            "pyspark_job": {
+                "main_python_file_uri": "gs://your-bucket/scripts/gold_transform.py"
+            }
+        }
+    )
+
+    # Task dependency
+    ingest_data >> transform_data >> gold_transform
+
+
+
+
+    
